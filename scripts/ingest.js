@@ -79,6 +79,7 @@ try {
 
 const sourceTriangles = mesh.indices.length / 3;
 console.log(`  source          ${sourceTriangles.toLocaleString()} triangles, ${(mesh.positions.length / 3).toLocaleString()} vertices`);
+console.log(`  materials       ${mesh.materialCount} in source; dominant metalness ${mesh.dominantMaterial.metallic.toFixed(2)}, roughness ${mesh.dominantMaterial.roughness.toFixed(2)}`);
 if (mesh.skippedNonTriangle) {
   console.log(`  note            skipped ${mesh.skippedNonTriangle} non-triangle primitive(s)`);
 }
@@ -91,7 +92,7 @@ const TARGETS = tierTargets(sourceTriangles);
 const tiers = {};
 for (const [tier, target] of Object.entries(TARGETS)) {
   const started = Date.now();
-  const d = decimateToTarget(positions, mesh.indices, target);
+  const d = decimateToTarget(positions, mesh.indices, target, { colors: mesh.colors });
   const normals = computeNormals(d.positions, d.indices);
   tiers[tier] = {
     positions: d.positions.map((n) => Math.round(n * 10000) / 10000),
@@ -99,6 +100,7 @@ for (const [tier, target] of Object.entries(TARGETS)) {
     indices: d.indices,
     triangleCount: d.indices.length / 3,
     vertexCount: d.positions.length / 3,
+    ...(d.colors ? { colors: d.colors.map((n) => Math.round(n * 1000) / 1000) } : {}),
   };
   const pct = ((tiers[tier].triangleCount / sourceTriangles) * 100).toFixed(1);
   const note = tier === "2"
@@ -134,12 +136,23 @@ const payload = {
   },
   // An arbitrary model has no rim/tyre split; the viewer shades it with one material.
   tyreProfileRadius: 1e9,
+  // Metalness and roughness come from the model's dominant material; per-vertex colours
+  // carry the rest, so a multi-material model keeps looking like itself.
   material: {
-    name: "Polished metal",
-    rim: { color: "#c9ced6", metalness: 1.0, roughness: 0.24, clearcoat: 0.55, clearcoatRoughness: 0.2 },
+    name: mesh.materialCount
+      ? `From source · ${mesh.materialCount} material${mesh.materialCount === 1 ? "" : "s"}`
+      : "Polished metal",
+    rim: {
+      color: "#ffffff", // white, so the per-vertex colours are not tinted
+      metalness: mesh.dominantMaterial.metallic,
+      roughness: Math.max(0.08, mesh.dominantMaterial.roughness),
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.25,
+    },
     tyre: { color: "#14151a", metalness: 0.0, roughness: 0.92 },
-    envIntensity: 1.15,
+    envIntensity: 1.1,
     tyreProfileRadius: 1e9,
+    useVertexColors: true,
   },
   tiers,
 };

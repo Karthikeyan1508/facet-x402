@@ -242,9 +242,10 @@ resize();
 // Split triangles into rim vs tyre by radial distance so the two can take different
 // materials without the server having to ship separate submeshes.
 function buildGeometry(data) {
-  const { positions, normals, indices, tyreProfileRadius } = data;
+  const { positions, normals, indices, tyreProfileRadius, colors } = data;
   const pos = Float32Array.from(positions);
   const nor = Float32Array.from(normals);
+  const col = colors && colors.length === positions.length ? Float32Array.from(colors) : null;
 
   const rimIdx = [], tyreIdx = [];
   for (let i = 0; i < indices.length; i += 3) {
@@ -257,6 +258,7 @@ function buildGeometry(data) {
   const geom = new THREE.BufferGeometry();
   geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   geom.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  if (col) geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
   geom.setIndex([...rimIdx, ...tyreIdx]);
   geom.addGroup(0, rimIdx.length, 0);
   geom.addGroup(rimIdx.length, tyreIdx.length, 1);
@@ -267,6 +269,10 @@ function renderMesh(data, { wireframe }) {
   currentGeomData = data;
   meshGroup.clear();
   const geom = buildGeometry(data);
+  const hasColors = Boolean(geom.getAttribute("color"));
+  for (const m of [rimMat, tyreMat]) {
+    if (m.vertexColors !== hasColors) { m.vertexColors = hasColors; m.needsUpdate = true; }
+  }
   const mesh = new THREE.Mesh(geom, [rimMat, tyreMat]);
   mesh.rotation.x = -0.12;
   meshGroup.add(mesh);
@@ -291,6 +297,7 @@ function applyPBR(mat) {
   pbrMaterial = mat;
   scene.environment = envMap;
   rimMat = new THREE.MeshPhysicalMaterial({
+    vertexColors: Boolean(mat.useVertexColors),
     color: new THREE.Color(mat.rim.color),
     metalness: mat.rim.metalness, roughness: mat.rim.roughness,
     clearcoat: mat.rim.clearcoat, clearcoatRoughness: mat.rim.clearcoatRoughness,
@@ -298,6 +305,7 @@ function applyPBR(mat) {
     side: THREE.DoubleSide,
   });
   tyreMat = new THREE.MeshPhysicalMaterial({
+    vertexColors: Boolean(mat.useVertexColors),
     color: new THREE.Color(mat.tyre.color),
     metalness: mat.tyre.metalness, roughness: mat.tyre.roughness,
     envMapIntensity: 0.6,

@@ -11,7 +11,8 @@
     "stub-facilitator": "node scripts/stub-facilitator.js",
     "optin": "node scripts/optin.js",
     "wallets:status": "node scripts/wallets-status.js",
-    "ingest": "node scripts/ingest.js"
+    "ingest": "node scripts/ingest.js",
+    "inspect": "node scripts/inspect-glb.js"
   },
   "dependencies": {
     "@x402/avm": "^2.22.0",
