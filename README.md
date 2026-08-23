@@ -14,6 +14,8 @@ cents, against exactly the same endpoints.
 
 Same viewer, same session. Everything between those two images was paid for on chain.
 
+**Live:** `https://facet-x402.vercel.app` · **Example transaction:** see [proof](#x402-transaction-proof)
+
 ---
 
 ## Table of contents
@@ -25,8 +27,8 @@ Same viewer, same session. Everything between those two images was paid for on c
 - [Flow of working](#flow-of-working)
 - [The tiers](#the-tiers)
 - [Setup guide](#setup-guide)
+- [Deploying to Vercel](#deploying-to-vercel)
 - [Testing and verification](#testing-and-verification)
-- [Deploying](#deploying)
 - [x402 transaction proof](#x402-transaction-proof)
 - [USP — what is actually different](#usp--what-is-actually-different)
 - [Known limitations](#known-limitations)
@@ -102,7 +104,7 @@ use, with the transactions public on chain.
 - Payee address is visible per tier in the public catalogue before you buy
 
 **Agent-native by construction**
-- A free `/catalog` endpoint that is a machine-readable price list, including what each
+- A free `/api/catalog` endpoint that is a machine-readable price list, including what each
   tier is `suitableFor`
 - A working autonomous buyer agent that reads the catalogue, reasons about the minimum
   fidelity its task requires, refuses to buy what it will not use, and pays
@@ -115,15 +117,15 @@ use, with the transactions public on chain.
 - Live triangle counter, tier indicator, material and licence status
 - Running ledger of settled payments with per-transaction explorer links
 
-**Operationally sane**
-- Facilitator preflight at boot, so an unreachable facilitator fails loudly with a remedy
-  instead of surfacing as an opaque 500 on the first unlock
-- `/health` on both services reporting facilitator reachability
-- RFC 7807 Problem Details error bodies
-- Structured JSON logging
-- Zero build step — plain ESM JavaScript, `node src/...` and it runs
-- Three.js served from `node_modules`, not a CDN, so venue wifi cannot break the viewer
-- Docker and docker-compose included
+**Deploys as one thing**
+- A single Vercel project: static viewer plus one serverless function, no containers, no
+  long-running processes, no separate frontend and backend hosts
+- Zero build step — plain ESM JavaScript
+- Three.js vendored into `public/`, so the viewer has no CDN dependency and cannot be
+  broken by conference wifi
+- Unlock rate limiting to slow down wallet drain on a public URL
+- `/api/health` reports facilitator reachability and whether every wallet is configured
+- RFC 7807 Problem Details error bodies, structured JSON logging
 - Two offline development aids: a stub facilitator, and a preview-tier override so you can
   iterate on the UI without spending testnet funds
 
@@ -138,29 +140,41 @@ flowchart LR
         A["Autonomous agent<br/><i>npm run agent</i>"]
     end
 
-    G["Gateway :4020<br/>buyer wallet · x402 client<br/>serves the viewer"]
-    S["Asset server :4030<br/>seller · x402 resource server<br/>procedural LOD generator"]
+    subgraph vercel ["One Vercel project"]
+        ST["Static<br/>public/ — viewer + three.js"]
+        FN["Serverless function<br/>api/index.js"]
+        subgraph roles [" "]
+            SELL["SELLER routes<br/>/api/asset/:id/:tier<br/>x402-gated"]
+            BUY["BUYER route<br/>/api/unlock/:tier<br/>holds the wallet"]
+        end
+    end
+
     F["GoPlausible facilitator<br/>verify + settle"]
     ALGO[("Algorand testnet<br/>USDC ASA 10458941")]
 
-    B -->|"POST /api/unlock/:tier"| G
-    G -->|"1 · POST tier route"| S
-    S -->|"2 · 402 + payment challenge"| G
-    G -->|"3 · retry with X-PAYMENT"| S
-    S -->|"4 · verify + settle"| F
+    B --> ST
+    B -->|"POST /api/unlock/:tier"| BUY
+    FN --- SELL
+    FN --- BUY
+    BUY -->|"1 · POST tier route<br/>2 · 402 challenge<br/>3 · retry with X-PAYMENT"| SELL
+    SELL -->|"4 · verify + settle"| F
     F --> ALGO
-    S -->|"5 · 200 + geometry / material / licence"| G
-    G -->|"payload + txId"| B
-    A -->|"reads free /catalog,<br/>pays only the tiers its task needs"| S
+    SELL -->|"5 · 200 + geometry / material / licence"| BUY
+    BUY -->|"payload + txId"| B
+    A -->|"reads free /api/catalog,<br/>pays only the tiers its task needs"| SELL
 
     ALGO -.->|"tx id → Lora explorer"| B
 ```
 
-**Why two services.** The seller has to be a separate process from the buyer for the
-payment to be real — a service cannot meaningfully charge itself. The browser never holds
-a private key: it asks the gateway to unlock a tier, and the gateway performs the actual
-x402 payment with the buyer wallet. That is also what makes the deployed build a single
-URL — the gateway serves both the viewer and the API on one port.
+**Why buyer and seller are still separate.** A service cannot meaningfully charge itself,
+so the payment has to cross a real network boundary. The buyer route makes a genuine
+outbound HTTPS request to the seller's public URL and settles a real payment, exactly as an
+unrelated third party would — the agent in `agent/demo.js` hits the identical endpoints
+from outside the deployment and is indistinguishable to the seller. Packaging both roles
+in one Vercel project is a deployment convenience, not a shortcut around the protocol.
+
+**Why the browser never holds a key.** The buyer wallet lives only in server-side
+environment variables. The browser asks the function to unlock a tier; the function pays.
 
 ---
 
@@ -171,21 +185,21 @@ URL — the gateway serves both the viewer and the API on one port.
 This runs on every single unlock:
 
 ```
-1. Gateway  → Asset server : POST /asset/wheel-rt5/production        (no payment yet)
-2. Asset s. → Gateway      : 402 Payment Required
-                             PAYMENT-REQUIRED header, base64 JSON:
-                             { scheme: "exact",
-                               network: "algorand:SGO1GKSz…OiI=",   ← testnet genesis hash
-                               amount: "20000",                      ← $0.02 in USDC micro-units
-                               asset: "10458941",                    ← testnet USDC ASA
-                               payTo: "<modeller wallet>" }
-3. Gateway signs a payment for exactly that amount, to exactly that address, with the
-   buyer wallet, and retries the identical request carrying an X-PAYMENT header.
-4. Asset server hands that header to the GoPlausible facilitator, which verifies the
-   signature and submits the real transaction to Algorand testnet.
+1. Buyer  → Seller : POST /api/asset/wheel-rt5/production        (no payment yet)
+2. Seller → Buyer  : 402 Payment Required
+                     PAYMENT-REQUIRED header, base64 JSON:
+                     { scheme: "exact",
+                       network: "algorand:SGO1GKSz…OiI=",   ← testnet genesis hash
+                       amount: "20000",                      ← $0.02 in USDC micro-units
+                       asset:  "10458941",                   ← testnet USDC ASA
+                       payTo:  "<modeller wallet>" }
+3. Buyer signs a payment for exactly that amount, to exactly that address, with the buyer
+   wallet, and retries the identical request carrying an X-PAYMENT header.
+4. Seller hands that header to the GoPlausible facilitator, which verifies the signature
+   and submits the real transaction to Algorand testnet.
 5. Only after settlement does the route handler run for the first time. It returns 200
    with the payload, plus a payment-response header carrying the settled transaction id.
-6. Gateway decodes that id and returns it to the caller alongside the payload.
+6. Buyer decodes that id and returns it to the caller alongside the payload.
 ```
 
 Nothing before step 5 touches the geometry generator. The high-fidelity mesh is not
@@ -193,14 +207,13 @@ withheld by a flag in the response — it is never produced at all until money h
 
 ### Human path
 
-1. Browser loads the viewer from the gateway and calls `GET /api/catalog` (free) to render
-   the tier cards, and `GET /api/preview` (free) to render the 764-triangle watermarked
-   wireframe.
+1. Browser loads the static viewer, then calls `GET /api/catalog` (free) to render the tier
+   cards and `GET /api/preview` (free) to render the 764-triangle watermarked wireframe.
 2. User clicks **Unlock — $0.02**. Browser calls `POST /api/unlock/production`.
-3. Gateway runs the handshake above and returns the geometry plus the transaction id.
+3. The function runs the handshake above and returns the geometry plus the transaction id.
 4. Viewer rebuilds the mesh from the new vertex data. Triangle counter jumps, watermark
    clears, silhouette smooths.
-5. A row appears in the settled-payments ledger with a link to the transaction on Lora.
+5. A row appears in the settled-payments ledger linking to the transaction on Lora.
 6. Unlocking **PBR** ships no new geometry at all — only the material description — and
    produces the single largest visual jump, because it is what turns grey clay into a real
    wheel. That is the clearest demonstration that fidelity, not bytes, is the product.
@@ -211,8 +224,8 @@ withheld by a flag in the response — it is never produced at all until money h
 
 1. Agent is given a task, e.g. *"render a 512px product thumbnail for a parts-catalogue
    listing"*.
-2. Agent calls `GET /catalog` — free, no payment, no key. It gets prices, triangle counts,
-   payees and a `suitableFor` list for every tier.
+2. Agent calls `GET /api/catalog` — free, no payment, no key. It gets prices, triangle
+   counts, payees and a `suitableFor` list for every tier.
 3. Agent reasons about the minimum sufficient fidelity. For a 512px thumbnail only the
    silhouette survives, so it buys **draft** and explicitly declines production, PBR and
    licence.
@@ -240,19 +253,94 @@ Three tasks, same endpoints, three different amounts spent:
 
 ---
 
+## Who sells, who buys, and what Facet cannot do
+
+Worth being blunt about, because it is the first thing people get wrong.
+
+**Facet cannot upgrade a model you downloaded from somewhere else.** If you have a
+5,000-triangle free model, no service on earth can hand you the 500,000-triangle original
+— that detail is not in the file. Anything claiming otherwise is inventing geometry, not
+recovering it.
+
+**The seller is the creator, and they ingest their own master.** A studio holds the
+high-poly asset they built. They run it through Facet, which derives the tiers from it.
+The free low-poly preview a buyer sees *is that studio's own degraded version* — the same
+arrangement a stock marketplace already uses when it shows you a watermarked preview and
+charges for the real file.
+
+So the pipeline runs **master → tiers**, never the reverse. Facet's contribution is not
+creating detail; it is rationing detail the seller already has, and making the upgrade a
+half-cent HTTP request instead of a $79 checkout with an account, a cart and a licence PDF.
+
+The practical consequence: **ingest your master, not a preview.** Feed it something
+already decimated and every tier comes out near-identical, because there is nothing left
+to ration. The ingester warns you when it detects this.
+
+---
+
+## Using your own 3D asset
+
+Facet ships with a procedurally generated alloy wheel so a fresh clone works with no asset
+file at all. To sell something else, ingest a binary glTF:
+
+```bash
+npm run ingest -- path/to/model.glb --name "Brake Caliper, 4-pot"
+```
+
+That reads the GLB, merges every triangle primitive in world space, normalises the model to
+a consistent size, and generates the three mesh tiers by vertex-clustering decimation —
+writing them to `assets/tiers.json`. Restart the server and it serves that asset instead.
+Delete the file to go back to the wheel.
+
+Tier budgets are **relative to your source**, not fixed numbers: roughly 3% for the free
+preview, 15% for the draft, and **100% — your untouched master — for the production tier**.
+That last one is the whole point. A buyer paying the top price receives exactly what you
+ingested.
+
+```
+Ingesting caliper.glb
+  source          182,441 triangles, 94,220 vertices
+  tier 0              742 triangles (target 764)   61ms
+  tier 1             3,905 triangles (target 3760)  44ms
+  tier 2            24,880 triangles (target 25272) 39ms
+  wrote           assets/tiers.json (1.1 MB)
+```
+
+Tiers are generated **ahead of time**, not per request, because a serverless function has
+no writable disk and no budget to decimate a large mesh inside a request. If you want a
+deployment to serve an ingested asset, commit `assets/tiers.json` — `.gitignore` excludes
+it by default since it is a build artefact.
+
+Notes:
+- **`.glb` only.** A `.gltf` + `.bin` pair will not load; re-export as binary glTF.
+- **Use a model with at least ~30k triangles**, and make it your master rather than a
+  preview. Below that the tiers barely differ and the demonstration falls flat. The
+  ingester warns you when it detects this.
+- **Masters above ~70,000 triangles get capped.** Geometry-as-JSON costs about 39 bytes a
+  triangle, so 70k is ~2.7 MB — the most that fits comfortably in a serverless response.
+  Above that the top tier is a decimated version rather than your true master, and the
+  ingester says so plainly. Fixing it properly needs mesh compression or chunked
+  delivery, both on the roadmap.
+- Materials, textures, animation and skinning are ignored — only geometry is read. An
+  ingested asset is shaded with a single polished-metal PBR set at tier 3.
+- Check the licence on anything you did not model yourself. The built-in wheel is
+  generated from maths in `lib/geometry.js`, so it carries no third-party licence at all.
+
+---
+
 ## Setup guide
 
 ### Prerequisites
 
 - **Node.js 20 or newer** (`node --version`)
 - Four Algorand **testnet** accounts
-- Internet access to `facilitator.goplausible.xyz` and the Algorand testnet API
+- Network access to `facilitator.goplausible.xyz` and the Algorand testnet API
 
 ### 1. Install
 
 ```bash
-git clone <your-repo-url>
-cd facet
+git clone https://github.com/Karthikeyan1508/facet-x402.git
+cd facet-x402
 npm install
 cp .env.example .env
 ```
@@ -272,43 +360,62 @@ This prints four accounts in `.env`-ready form:
 | `FACET_MATERIAL_ADDRESS` | receives PBR-tier payments | opt-in only |
 | `FACET_RIGHTS_ADDRESS` | receives licence-tier payments | opt-in only |
 
-Paste them into `.env`. If you already have a funded testnet wallet from another project,
-reuse it as the buyer — it saves the whole funding step.
+Paste them into `.env`. If you already have a funded testnet wallet, reuse it as the buyer
+and skip the funding step.
 
 ### 3. Fund and opt in
 
-- Fund the **buyer** with testnet ALGO: <https://bank.testnet.algorand.network>
-- Fund the **buyer** with testnet USDC (ASA `10458941`)
-- **Opt all three receiving accounts in to ASA `10458941`.** An Algorand account cannot
-  receive an ASA it has not opted into, so payments to a non-opted-in payee will fail.
+**The order matters:** ALGO → opt in → USDC. An account cannot receive USDC before it has
+opted in, and cannot opt in without ALGO. This catches everyone once.
 
-Budget generously — a full click-through of all four tiers costs $0.105, and you will run
-it many times while rehearsing.
+1. **Fund all four accounts with ALGO** at <https://lora.algokit.io/testnet/fund> (or
+   <https://bank.testnet.algorand.network>) — 4 ALGO to the buyer, ~1 each to the three
+   payees. `npm run wallets:status` prints every address, including unfunded ones.
+2. **Opt every account in to USDC**, the buyer included:
+   ```bash
+   npm run optin
+   ```
+3. **Fund the buyer with USDC** — Lora's *Fund with USDC* section, or
+   <https://faucet.circle.com> (choose Algorand testnet). Only the buyer needs it.
+4. **Verify:**
+   ```bash
+   npm run wallets:status    # every row must say "opted in: yes"
+   ```
 
-### 4. Run
+A full click-through of all four tiers costs $0.105. Fund enough for a few dozen runs —
+but see the warning under [Known limitations](#known-limitations) about *not*
+over-funding the buyer on a public deployment.
+
+> **New to Algorand?** [`PAYMENTS_SETUP.md`](PAYMENTS_SETUP.md) explains accounts, keys,
+> ALGO vs USDC, minimum balances, opt-in, the full payment flow and a troubleshooting
+> table. Written for teammates with no blockchain background.
+
+### 4. Run locally
 
 ```bash
 npm run dev
 ```
 
-That boots both services together with prefixed logs. Then open **<http://localhost:4020>**.
-
-Individually, if you prefer separate terminals:
-
-```bash
-npm run start:asset-server   # :4030 — the seller
-npm run start:gateway        # :4020 — the buyer + viewer
-```
+Open **<http://localhost:4020>**. The same Express app that runs here is what runs as the
+serverless function on Vercel, so local and deployed behaviour match.
 
 ### 5. Confirm it is healthy
 
 ```bash
-curl http://localhost:4030/health
-# {"ok":true,"facilitator":"https://facilitator.goplausible.xyz","facilitatorReachable":true}
+curl http://localhost:4020/api/health
+```
+
+```json
+{
+  "ok": true,
+  "facilitatorReachable": true,
+  "payeesConfigured": { "modeller": true, "material": true, "rights": true },
+  "buyerConfigured": true
+}
 ```
 
 If `facilitatorReachable` is `false`, every paid tier will fail. Fix that before anything
-else — the boot log names the reason and the remedy.
+else.
 
 ### Environment variables
 
@@ -319,11 +426,82 @@ else — the boot log names the reason and the remedy.
 | `FACET_MATERIAL_ADDRESS` | — | Payee for tier 3 |
 | `FACET_RIGHTS_ADDRESS` | — | Payee for tier 4 |
 | `FACILITATOR_URL` | `https://facilitator.goplausible.xyz` | x402 facilitator |
-| `ASSET_SERVER_URL` | `http://localhost:4030` | Where the gateway finds the seller |
-| `ASSET_SERVER_PORT` | `4030` | Seller port |
-| `PORT` | `4020` | Gateway port |
+| `MAX_UNLOCKS_PER_MINUTE` | `15` | Unlock throttle per warm instance |
+| `ASSET_SERVER_URL` | this deployment's own origin | Only set if the seller lives elsewhere |
+| `PORT` | `4020` | Local dev port; ignored by Vercel |
+| `ALGOD_URL` | `https://testnet-api.algonode.cloud` | Algorand node, used by the wallet scripts only |
+| `USDC_ASA_ID` | `10458941` | Testnet USDC asset id |
+| `FACET_*_MNEMONIC` | — | Payee mnemonics — local only, used once by `npm run optin`. **Never add to Vercel.** |
 | `PREVIEW_TIER` | `0` | **Dev only.** Serve a paid tier from the free endpoint |
 | `PREVIEW_MATERIAL` | unset | **Dev only.** Add PBR to the free preview |
+
+---
+
+## Deploying to Vercel
+
+There is nothing to containerise and no build step. Vercel serves `public/` statically and
+runs `api/index.js` as a single serverless function; `vercel.json` rewrites every `/api/*`
+request to it and raises the function timeout to 60s so on-chain settlement has room.
+
+### Via the dashboard
+
+1. Push this repo to GitHub.
+2. On Vercel: **Add New → Project**, import the repo.
+3. Framework preset: **Other**. Leave build command and output directory empty — there is
+   no build.
+4. Add the environment variables from your `.env` under **Settings → Environment
+   Variables**, for the *Production* environment:
+   - `FACET_BUYER_PRIVATE_KEY` (paste the 25-word mnemonic in quotes exactly as in `.env`)
+   - `FACET_MODELLER_ADDRESS`
+   - `FACET_MATERIAL_ADDRESS`
+   - `FACET_RIGHTS_ADDRESS`
+   - `FACILITATOR_URL` = `https://facilitator.goplausible.xyz`
+5. Deploy.
+
+### Via the CLI
+
+```bash
+npm i -g vercel
+vercel login
+vercel link
+vercel env add FACET_BUYER_PRIVATE_KEY production
+vercel env add FACET_MODELLER_ADDRESS production
+vercel env add FACET_MATERIAL_ADDRESS production
+vercel env add FACET_RIGHTS_ADDRESS production
+vercel --prod
+```
+
+### Verify the deployment
+
+Do this before telling anyone the link is live. Network egress from a Vercel function is
+not the same as from your laptop, so assume nothing:
+
+```bash
+curl https://<your-app>.vercel.app/api/health          # facilitatorReachable must be true
+curl https://<your-app>.vercel.app/api/catalog
+
+curl -i -X POST https://<your-app>.vercel.app/api/asset/wheel-rt5/production \
+     -H "Content-Type: application/json" -d '{}'       # must be 402
+```
+
+Then open the site and complete one real unlock end to end, and click through to Lora.
+
+You can also point the agent at the deployment, which proves an outside party can transact
+with no keys and no accounts:
+
+```bash
+FACET_URL=https://<your-app>.vercel.app npm run agent -- campaign
+```
+
+### Notes on serverless behaviour
+
+- **Cold starts** re-run the facilitator handshake, so the first unlock after an idle
+  period is a second or two slower. Warm it up before demoing by loading the page once.
+- **`ASSET_SERVER_URL` is derived per request** from the incoming `x-forwarded-proto` and
+  `host` headers, so the buyer always pays whichever origin served the request. Nothing to
+  configure for preview deployments or custom domains.
+- **Response size**: the largest payload (production mesh) is ~920 KB, well inside Vercel's
+  limit.
 
 ---
 
@@ -331,14 +509,14 @@ else — the boot log names the reason and the remedy.
 
 ```bash
 # Free — this is how an agent discovers what is for sale
-curl http://localhost:4030/catalog
+curl http://localhost:4020/api/catalog
 
 # A paid tier without paying → 402 plus a signed challenge
-curl -i -X POST http://localhost:4030/asset/wheel-rt5/production \
+curl -i -X POST http://localhost:4020/api/asset/wheel-rt5/production \
      -H "Content-Type: application/json" -d '{}'
 
 # Decode the challenge to see amount, asset, network and payee
-curl -si -X POST http://localhost:4030/asset/wheel-rt5/production \
+curl -si -X POST http://localhost:4020/api/asset/wheel-rt5/production \
      -H "Content-Type: application/json" -d '{}' \
   | grep -i '^payment-required' | sed 's/^[^:]*: //' | tr -d '\r' | base64 -d
 
@@ -348,42 +526,19 @@ npm run agent -- ar-tryon
 npm run agent -- campaign
 ```
 
-Expected: all four paid routes return `402` unpaid, `/catalog` and `/asset/wheel-rt5/preview`
-return `200`, and the decoded challenge shows `amount: "20000"`, `asset: "10458941"` and the
-Algorand testnet genesis hash.
+Expected: all four paid routes return `402` unpaid, `/api/catalog` and `/api/preview`
+return `200`, and the decoded challenge shows `amount: "20000"`, `asset: "10458941"` and
+the Algorand testnet genesis hash.
 
 ### Two offline development aids
 
-`node scripts/stub-facilitator.js` answers the facilitator's `/supported` handshake
-locally, so you can verify the shape of your 402 challenge with no network at all. It
-cannot settle anything — real unlocks still need the real facilitator.
+`npm run stub-facilitator` answers the facilitator's `/supported` handshake locally, so you
+can verify the shape of your 402 challenge with no network at all. It cannot settle
+anything — real unlocks still need the real facilitator.
 
-`PREVIEW_TIER=2 PREVIEW_MATERIAL=1` on the asset server makes the *free* endpoint serve
-paid fidelity, so you can iterate on the viewer without spending testnet funds on every
-reload. The server logs a loud warning when either is set. Never set them in a deployment.
-
----
-
-## Deploying
-
-The gateway serves the viewer and the API on one port, so the deployed product is a single
-URL.
-
-```bash
-docker compose up --build
-```
-
-On a public VM, open only the gateway port (`4020`) and keep the asset server on the
-internal Docker network. Both services read the same `.env`.
-
-Two things to check after deploying, because they are the usual causes of a demo failing
-in front of judges:
-
-1. `curl http://<host>:4020/health` and `curl` the asset server's health from inside the
-   network — confirm `facilitatorReachable: true` **from the deployed host**, not just from
-   your laptop.
-2. Run one real unlock against the deployed URL and click through to Lora. Network egress
-   differs between your machine and a cloud VM; assume nothing.
+`PREVIEW_TIER=2 PREVIEW_MATERIAL=1 npm run dev` makes the *free* endpoint serve paid
+fidelity, so you can iterate on the viewer without spending testnet funds on every reload.
+Never set these in a deployment.
 
 ---
 
@@ -426,18 +581,21 @@ this buyer acquired these rights at this moment.
 
 Stated plainly, because they are the honest boundary of what was built in a day.
 
-- **The gateway spends its wallet for anyone who can reach it.** `POST /api/unlock/*`
-  triggers a real payment with no authentication or spend cap. That is fine locally; on a
-  public URL, anyone hitting the endpoint in a loop drains the buyer wallet. A per-session
-  spend cap and rate limit is the first thing to add before exposing it publicly.
+- **The buyer wallet is spent by anyone who can reach the deployment.** `/api/unlock/*` is
+  public and unauthenticated by design — that is what makes it agent-native — so the
+  balance in the buyer wallet is the real spending cap. The rate limiter is a speed bump,
+  not a guarantee, because each warm serverless instance counts separately.
+  **Fund the buyer with a small amount, not your whole faucet balance.**
 - **Entitlement is per-request, not persistent.** Paying for a tier does not record that
   you own it — reload the page and you pay again. There is no receipt lookup yet.
-- **One asset.** The catalogue is a single procedurally generated wheel, not an ingestion
-  pipeline for arbitrary uploaded models.
-- **Geometry is procedural, not authored.** It is real generated geometry at genuinely
-  different triangle budgets, but it is not a scanned or artist-made asset.
+- **One asset at a time.** Ingestion replaces the catalogue's single asset rather than
+  adding to it; there is no multi-asset catalogue yet.
+- **Decimation is vertex clustering.** It genuinely reduces triangle counts and the tiers
+  are visibly different, but quality is below a quadric-error decimator — thin features
+  pick up jagged edges at the lowest tier.
+- **Ingestion reads geometry only.** Materials, textures, animation and skinning in the
+  source GLB are discarded.
 - **Payouts are separate transactions, not an atomic split.** Each tier pays one wallet.
-  Splitting a single tier's revenue across several parties at once is not implemented.
 - **No GLB/USDZ export.** The licence tier grants rights but hands back JSON vertex data
   rather than a file an AR viewer or DCC tool can open directly.
 - **Testnet only.**
@@ -448,22 +606,28 @@ Stated plainly, because they are the honest boundary of what was built in a day.
 
 ### Near term — the obvious next build
 
-- **Spend cap and rate limiting on the gateway**, so a public deployment cannot be drained.
 - **Persistent entitlements.** Record settled transactions against the buyer's account and
   check that record before charging again, so ownership survives a reload. The chain
-  already holds the proof; it just needs to be read back.
-- **Real asset ingestion.** Accept an uploaded GLB and generate the tiers automatically
-  with `meshoptimizer` / `gltf-transform` decimation, instead of one procedural model.
-  This is what turns a demo into a product.
+  already holds the proof; it just needs to be read back. This also removes most of the
+  wallet-drain exposure, because a repeat request stops costing anything.
+- **Deliver masters of any size.** The top tier is capped at ~70k triangles by the
+  serverless response limit. Draco or meshopt compression, or chunked delivery, would
+  remove the ceiling — without which Facet cannot serve genuinely large production assets.
+- **Better decimation.** Ingestion works (`npm run ingest`), but it uses vertex
+  clustering — crude next to quadric error metrics, and it leaves visible jaggies on thin
+  features. Swapping in `meshoptimizer` would improve tier quality substantially.
+- **Upload through the UI**, so ingestion does not require shell access to the deployment.
 - **GLB and USDZ export on the licence tier**, so the thing you bought drops straight into
   a DCC tool, a game engine, or iOS Quick Look.
+- **Durable rate limiting** backed by Vercel KV or Upstash, so the throttle is global
+  rather than per warm instance.
 
 ### Medium term — making it a marketplace
 
 - **Multi-asset catalogue** with search and tags, so agents can discover assets rather than
   being handed one URL.
 - **Register on the real x402 Bazaar** so any agent on the network can discover Facet
-  assets globally, not just ones pointed at this server.
+  assets globally, not just ones pointed at this deployment.
 - **Atomic revenue splitting** using Algorand atomic transaction groups, so a single tier
   purchase can pay several contributors in one settled group rather than sequentially.
 - **Creator analytics.** Which tiers sell, to whom, how often — the data a studio needs to
@@ -491,21 +655,31 @@ Stated plainly, because they are the honest boundary of what was built in a day.
 ## Project structure
 
 ```
-facet/
-├── src/
-│   ├── geometry.js       procedural LOD generator — the actual product
-│   ├── asset-server.js   SELLER  :4030 — x402-gated tiers, catalogue, preview
-│   ├── gateway.js        BUYER   :4020 — holds the wallet, pays, serves the viewer
-│   └── agent-demo.js     autonomous buyer agent
+facet-x402/
+├── api/
+│   └── index.js          Vercel serverless entry — mounts the Express app
+├── lib/
+│   ├── app.js            the whole app: seller routes, buyer route, throttle
+│   ├── catalogue.js      tier definitions, prices, payees — one source of truth
+│   ├── asset.js          resolves ingested asset vs built-in procedural wheel
+│   ├── geometry.js       procedural LOD generator — the built-in asset
+│   ├── glb.js            binary glTF reader, no dependencies
+│   └── decimate.js       vertex-clustering decimation to a triangle budget
 ├── public/
-│   └── index.html        Three.js viewer, single file, no build step
+│   ├── index.html        Three.js viewer, single file, no build step
+│   └── vendor/three/     three.js vendored, so there is no CDN dependency
+├── agent/
+│   └── demo.js           autonomous buyer agent
 ├── scripts/
-│   ├── dev.js               boots both services together
+│   ├── dev.js               local server running the same app
 │   ├── generate-wallets.js  mints the four accounts
+│   ├── ingest.js            .glb -> assets/tiers.json
+│   ├── optin.js             opts every account in to USDC (one-time)
+│   ├── wallets-status.js    balances + opt-in state for all four wallets
 │   └── stub-facilitator.js  offline facilitator stand-in
 ├── docs/                 screenshots used above
-├── Dockerfile
-├── docker-compose.yml
+├── vercel.json           /api/* rewrite + 60s function timeout
+├── PAYMENTS_SETUP.md     Algorand + x402 guide for the team
 └── .env.example
 ```
 
@@ -514,5 +688,5 @@ facet/
 ## Built with
 
 `@x402/core` · `@x402/avm` · `@x402/express` · `@x402/fetch` · Algorand testnet USDC ·
-GoPlausible facilitator · Express · Three.js (served from `node_modules`, no CDN) ·
+GoPlausible facilitator · Express · Three.js (vendored, no CDN) · Vercel serverless ·
 plain ESM JavaScript, no build step.

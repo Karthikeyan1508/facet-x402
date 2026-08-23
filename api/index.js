@@ -13,11 +13,11 @@ import { createApp } from "../lib/app.js";
 const app = createApp();
 
 export default function handler(req, res) {
-    // Depending on how the rewrite fires, req.url may or may not still carry the /api
-    // prefix. The x402 middleware matches on the exact path, so normalise it before the
-    // app sees it — otherwise the gated routes silently stop being gated.
-    if (!req.url.startsWith("/api")) {
-        req.url = "/api" + (req.url === "/" ? "" : req.url);
-    }
-    return app(req, res);
+  // Depending on how the rewrite fires, req.url may or may not still carry the /api
+  // prefix. The x402 middleware matches on the exact path, so normalise it before the
+  // app sees it — otherwise the gated routes silently stop being gated.
+  if (!req.url.startsWith("/api")) {
+    req.url = "/api" + (req.url === "/" ? "" : req.url);
+  }
+  return app(req, res);
 }

@@ -10,7 +10,8 @@
     "wallets": "node scripts/generate-wallets.js",
     "stub-facilitator": "node scripts/stub-facilitator.js",
     "optin": "node scripts/optin.js",
-    "wallets:status": "node scripts/wallets-status.js"
+    "wallets:status": "node scripts/wallets-status.js",
+    "ingest": "node scripts/ingest.js"
   },
   "dependencies": {
     "@x402/avm": "^2.22.0",
