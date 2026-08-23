@@ -261,6 +261,13 @@ Three tasks, same endpoints, three different amounts spent:
 | 3 | PBR material set | $0.03 | material artist | Diamond-cut alloy with clearcoat + tyre compound |
 | 4 | Commercial licence | $0.05 | rights holder | Redistribution rights; **the settled transaction is the receipt** |
 
+Facet wallet status — USDC ASA 10458941 on https://testnet-api.algonode.cloud
+
+<img width="977" height="372" alt="image" src="https://github.com/user-attachments/assets/1bdf2a36-48e4-4c7b-9de2-04761d9574e8" />
+
+All four wallets are funded and opted in. Payments should work.
+
+
 ---
 
 ## Who sells, who buys, and what Facet cannot do
