@@ -8,9 +8,9 @@ separately, meters them by fidelity, and settles every request as a real micropa
 Algorand testnet — so a thumbnail bot pays half a cent and a campaign render pays ten
 cents, against exactly the same endpoints.
 
-| Free preview — 764 triangles, wireframed | Unlocked — 25,272 triangles + PBR materials |
+| Free preview — 662 triangles, wireframed | Unlocked — 2 triangles + PBR materials |
 |---|---|
-| ![free preview](docs/tier0-free-preview.png) | ![unlocked](docs/tier3-unlocked.png) |
+| <img width="1918" height="897" alt="image" src="https://github.com/user-attachments/assets/7772c32b-6cd2-47ab-a9d2-671a0a6e1703" /> | <img width="1919" height="902" alt="image" src="https://github.com/user-attachments/assets/4ee9db9b-a59f-4f07-b484-94dad1d0284e" /> |
 
 Same viewer, same session. Everything between those two images was paid for on chain.
 
