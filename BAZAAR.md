@@ -104,6 +104,20 @@ done
 **Facilitators skip loopback addresses.** A localhost deployment will never be catalogued
 publicly, which is why the offline stub exists.
 
+**The advertised URL must be https.** Behind a reverse proxy, Express reports the internal
+hop, so the 402 advertises `http://your-app.vercel.app/...` — a URL that does not work and
+that a facilitator has every reason to skip. `app.set("trust proxy", true)` makes
+`x-forwarded-proto` authoritative and fixes it. Check yours before assuming the facilitator
+is at fault:
+
+```powershell
+$r = curl.exe -s -i -X POST "$base/api/asset/wheel-rt5/draft" -H "Content-Type: application/json" -d "{}"
+$h = ($r | Select-String "payment-required:").ToString() -replace "(?i)^payment-required:\s*",""
+[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($h.Trim()))
+```
+
+The `resource.url` in that output must start with `https://`.
+
 ---
 
 ## Verifying it worked
