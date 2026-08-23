@@ -12,7 +12,9 @@
     "optin": "node scripts/optin.js",
     "wallets:status": "node scripts/wallets-status.js",
     "ingest": "node scripts/ingest.js",
-    "inspect": "node scripts/inspect-glb.js"
+    "inspect": "node scripts/inspect-glb.js",
+    "bazaar:list": "node scripts/bazaar-list.js",
+    "agent:discover": "node agent/discover.js"
   },
   "dependencies": {
     "@x402/avm": "^2.22.0",
