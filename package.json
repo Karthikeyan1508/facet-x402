@@ -1,0 +1,28 @@
+{
+  "name": "facet",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pay-per-fidelity delivery for 3D assets, settled per request over x402 on Algorand.",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "agent": "node agent/demo.js",
+    "wallets": "node scripts/generate-wallets.js",
+    "stub-facilitator": "node scripts/stub-facilitator.js",
+    "optin": "node scripts/optin.js",
+    "wallets:status": "node scripts/wallets-status.js"
+  },
+  "dependencies": {
+    "@x402/avm": "^2.22.0",
+    "@x402/core": "^2.22.0",
+    "@x402/express": "^2.22.0",
+    "@x402/fetch": "^2.22.0",
+    "algosdk": "^3.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
