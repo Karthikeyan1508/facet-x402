@@ -118,8 +118,19 @@ async function main() {
   console.log(`known seller: \x1b[2m(none — nothing is hardcoded)\x1b[0m\n`);
 
   const bazaar = withBazaar(new HTTPFacilitatorClient({ url: FACILITATOR_URL }));
-  const { items = [], pagination } = await bazaar.extensions.bazaar.listResources({ type: "http", limit: 500 });
-  console.log(`Queried the Bazaar: ${(pagination?.total ?? items.length).toLocaleString()} resources catalogued.`);
+
+  // Page through the catalogue. A single page silently hides every seller past the first
+  // 200, which for a newly registered seller means all of them.
+  const items = [];
+  let total = 0;
+  for (let offset = 0; ; offset += 200) {
+    const page = await bazaar.extensions.bazaar.listResources({ type: "http", limit: 200, offset });
+    const batch = page.items ?? [];
+    total = page.pagination?.total ?? batch.length;
+    items.push(...batch);
+    if (!batch.length || items.length >= total || items.length >= 5000) break;
+  }
+  console.log(`Queried the Bazaar: ${total.toLocaleString()} resources catalogued, ${items.length} examined.`);
 
   const client = buildClient();
   const receipts = [];
