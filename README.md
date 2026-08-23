@@ -219,6 +219,16 @@ withheld by a flag in the response — it is never produced at all until money h
    wheel. That is the clearest demonstration that fidelity, not bytes, is the product.
 7. Unlocking **Commercial licence** returns a licence record whose proof is the settled
    transaction itself.
+8. A **Download .glb** button appears as soon as any mesh tier is owned. It writes the
+   geometry you paid for — plus the materials if you bought that tier — into a real binary
+   glTF that opens in Blender, Unity or Unreal. If you bought the licence, the settling
+   Algorand transaction is embedded inside the file's `asset.extras`, so the asset travels
+   with its own proof of purchase instead of a PDF in someone's inbox. If you did not, the
+   file records that it is unlicensed.
+
+**Buying a cheaper tier never downgrades what you own.** Purchase the production mesh and
+then the draft, and the viewer keeps showing the production mesh — the draft is recorded as
+bought, but you keep the best thing you have paid for.
 
 ### Agent path
 
@@ -596,8 +606,8 @@ Stated plainly, because they are the honest boundary of what was built in a day.
 - **Ingestion reads geometry only.** Materials, textures, animation and skinning in the
   source GLB are discarded.
 - **Payouts are separate transactions, not an atomic split.** Each tier pays one wallet.
-- **No GLB/USDZ export.** The licence tier grants rights but hands back JSON vertex data
-  rather than a file an AR viewer or DCC tool can open directly.
+- **No USDZ export.** `.glb` download works; iOS Quick Look wants `.usdz`, which needs a
+  separate converter.
 - **Testnet only.**
 
 ---
